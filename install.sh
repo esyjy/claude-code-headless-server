@@ -50,10 +50,15 @@ cd "$INSTALL_DIR"
 echo "==> Installing dependencies..."
 bun install --frozen-lockfile 2>/dev/null || bun install
 
-# Install wrapper script
+# Install wrapper script as a symlink so `git pull` in $INSTALL_DIR
+# picks up wrapper changes too. Earlier versions used `cp`, which
+# silently desync'd: pulling new source did not update the wrapper, so
+# bug fixes to the `tui` (and other) subcommands never took effect on
+# existing installs. See #7.
 echo "==> Installing claude-headless-server command..."
-cp "$INSTALL_DIR/scripts/claude-headless-server.sh" "$WRAPPER" 2>/dev/null || true
-chmod +x "$WRAPPER" 2>/dev/null || true
+rm -f "$WRAPPER" 2>/dev/null || true
+ln -sf "$INSTALL_DIR/scripts/claude-headless-server.sh" "$WRAPPER" 2>/dev/null || true
+chmod +x "$INSTALL_DIR/scripts/claude-headless-server.sh" 2>/dev/null || true
 
 # Try to symlink to PATH
 INSTALLED=0

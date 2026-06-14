@@ -202,6 +202,15 @@ git remote add upstream https://github.com/chyun-code/claude-code-headless-serve
   installed v0.6.0 build. `src/routes/health.ts` hard-codes or reads
   a stale `package.json`. Track separately (Phase 7 surface or
   hotfix candidate).
+- **2026-06-15 — install.sh used `cp` for the wrapper.** Updating
+  source via `git pull` left the executable wrapper at
+  `~/.claude-headless-server/claude-headless-server` unchanged, so
+  bug fixes to subcommands (`tui` in particular) never took effect on
+  existing installs. Symptom: `claude-headless-server tui` launched
+  default opencode instead of `opencode attach`. Fixed by switching
+  install.sh to `ln -sf`. **Existing installs need a re-cp
+  manually** or a fresh `bash install.sh` to pick up the symlink
+  layout. See #7.
 
 ---
 
