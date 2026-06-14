@@ -2,15 +2,14 @@
 
 Programmable HTTP API for Claude Code — semantic integration with OpenTUI. Permission modes, PTY WebSocket proxy, slash commands, tool execution, multi-turn sessions, and clean single-directory deployment.
 
-> 🚧 **Branch `phase-6` — work in progress.** Targeting `v0.6.0`:
-> Playbook v0.4.0 adoption + macbook hardening. Tracking: [#1].
-> Plan: [`docs/plans/phase-6-playbook-adoption.md`](docs/plans/phase-6-playbook-adoption.md).
-> Latest **shipped** release (on upstream): `chyun-code/...@v0.5.0`. This
-> fork has not yet cut its first release.
+> **v0.6.0** — Playbook v0.4.0 adoption + macbook hardening. `127.0.0.1`
+> default binding (ADR 0011, CI-enforced canary), macOS-portable
+> `tunnel.sh`, opt-in artifacts (PROJECT-POLICY, SESSION-CONTEXT, ADR
+> 0010), macOS CI lane, branch protection, label taxonomy.
+>
+> Inherits ADRs 0001~0009 from upstream `chyun-code/...@v0.5.0`.
 >
 > See [Releases](https://github.com/esyjy/claude-code-headless-server/releases) | [ADR Index](docs/adr/) | [Issues](https://github.com/esyjy/claude-code-headless-server/issues) | [Playbook](https://github.com/esyjy/playbook)
-
-[#1]: https://github.com/esyjy/claude-code-headless-server/issues/1
 
 ## Architecture
 
@@ -110,7 +109,7 @@ claude-headless-server uninstall
 
 **Removes ONLY `~/.claude-headless-server`.** No other files touched. No scattered config. No /etc pollution. No shell rc modifications. No irreversible system changes. Just one `rm -rf` of a single directory.
 
-## API (v0.5.0)
+## API (v0.6.0)
 
 | Endpoint | Status | Description |
 |---|---|---|
@@ -175,6 +174,10 @@ Mode switches via `PATCH /api/session/:id {permissionMode:acceptEdits}` or per-p
 | [0005](docs/adr/0005-opentui-compatibility.md) | OpenTUI Compatibility Interface |
 | [0006](docs/adr/0006-opencode-protocol-integration.md) | OpenCode Backend Protocol Integration |
 | [0007](docs/adr/0007-opencode-compatibility-layer.md) | OpenCode API Compatibility Layer |
+| [0008](docs/adr/0008-opencode-daemon-registration.md) | OpenCode Daemon Registration |
+| [0009](docs/adr/0009-basic-auth-compatibility.md) | Basic Auth Compatibility |
+| [0010](docs/adr/0010-playbook-v0.4.0-adoption.md) | Playbook v0.4.0 Adoption + Fork Relationship |
+| [0011](docs/adr/0011-localhost-default-binding.md) | `127.0.0.1` Default Binding, Opt-in External |
 
 ## License
 

@@ -7,10 +7,12 @@
 > below contradicts what you observe in the repo, the document is wrong
 > — fix it before you fix anything else.
 
-> Last updated: 2026-06-15 by initial scaffold (Step 6.1).
-> **main HEAD**: `7e92b16` `fix(cli,package): sync package.json version to v0.5.0 and expose bin entry (#17)`.
-> **Latest tag**: none yet on this fork (upstream `chyun-code` has v0.5.0).
-> **Next pickup**: Step 6.2 — pin `Bun.serve` to `127.0.0.1` + ADR 0011. See plan.
+> Last updated: 2026-06-15 by Step 6.5 release prep.
+> **main HEAD**: pending merge of phase-6 (this commit).
+> **Latest tag**: `v0.6.0` will land at the merge commit.
+> **Next pickup**: post-merge — run `bash install.sh` on macbook + verify
+> `lsof` shows 127.0.0.1 only. Phase 7 scope TBD (likely: unit test
+> framework, see PROJECT-POLICY overrides).
 
 ---
 
@@ -18,17 +20,22 @@
 
 **Current state**
 
-- **main HEAD**: `7e92b16` — `fix(cli,package): sync package.json version to v0.5.0 and expose bin entry (#17)` (inherited from upstream)
-- **Latest tag**: none on `esyjy/claude-code-headless-server` yet. Upstream `chyun-code` has v0.5.0.
-- **Active branch**: `phase-6`
-- **Tree state**: clean after Step 6.1 commit.
+- **main HEAD**: `7e92b16` (upstream sync). Will become the phase-6 merge commit after Step 6.5.
+- **Latest tag**: `v0.6.0` (this release).
+- **Active branch**: `phase-6` → merging to `main`.
+- **Tree state**: clean for release.
 
 **Next pickup**
 
-1. **Step 6.2** — `src/index.ts:Bun.serve({port})` → add `hostname: "127.0.0.1"` default with `CLAUDE_SERVER_HOST` env override. Write ADR 0011. Triage upstream Issue #16.
-2. **Step 6.3** — `scripts/tunnel.sh:14` `readlink -f` → POSIX-safe fallback for BSD readlink (macOS).
-3. **Step 6.4** — `Taskfile.yaml` + `.github/workflows/ci.yml` (macOS-latest only) + pre-push hook + GitHub label taxonomy.
-4. **Step 6.5** — Merge `phase-6` → `main`, tag `v0.6.0`, apply branch protection.
+1. **Post-merge install test** — on the maintainer's macbook:
+   `bash install.sh` (or `bash scripts/claude-headless-server.sh install`),
+   then `claude-headless-server start`, then `lsof -nP -iTCP:4096
+   -sTCP:LISTEN` must show **`127.0.0.1:4096` only** (no `*:4096`).
+2. **Phase 7 planning** — see PROJECT-POLICY.md "Project-specific
+   overrides" for the deferred-scope candidates (unit test framework
+   most likely first).
+3. **Upstream cleanup** — close `chyun-code/...#18` (mis-filed by this
+   session before `gh repo set-default` was configured).
 
 **Plan file**: `docs/plans/phase-6-playbook-adoption.md`.
 
@@ -67,25 +74,26 @@
 
 ### Released
 
-This fork has no releases yet. v0.6.0 is the first. Upstream
-`chyun-code/claude-code-headless-server` shipped v0.1.0 → v0.5.0 on
-2026-06-14.
+| Version | Date | Headline |
+|---|---|---|
+| v0.6.0 | 2026-06-15 | Playbook adoption + macbook hardening |
+
+Upstream `chyun-code/claude-code-headless-server` shipped v0.1.0 →
+v0.5.0 on 2026-06-14. ADRs 0001~0009 inherited.
 
 ### Active branch
 
-- `phase-6` — playbook adoption + hardening. Plan:
-  [`docs/plans/phase-6-playbook-adoption.md`](plans/phase-6-playbook-adoption.md).
-- Tracking issue: #1.
+- `main` — at v0.6.0.
 
-### Step status
+### Step status (phase-6, closed)
 
 | Step | Deliverable | Status |
 |---|---|---|
-| 6.1 | Opt-in scaffold + ADR 0010 | 🚧 in-progress |
-| 6.2 | Bun.serve hostname pin + ADR 0011 | pending |
-| 6.3 | macOS tunnel.sh compat | pending |
-| 6.4 | Taskfile + CI + pre-push + labels | pending |
-| 6.5 | Merge + v0.6.0 tag + branch protection | pending |
+| 6.1 | Opt-in scaffold + ADR 0010 | ✅ shipped |
+| 6.2 | Bun.serve hostname pin + ADR 0011 | ✅ shipped |
+| 6.3 | macOS tunnel.sh compat | ✅ shipped |
+| 6.4 | Taskfile + CI + pre-push + labels | ✅ shipped |
+| 6.5 | Merge + v0.6.0 tag + branch protection | 🚧 in-progress |
 
 ---
 
@@ -100,12 +108,12 @@ This fork has no releases yet. v0.6.0 is the first. Upstream
 2. **Single-OS CI exemption** (macOS-latest only). Target install
    surface is the user's macbook.
 
-### New ADRs being authored
+### ADRs shipped in v0.6.0
 
-| ADR | Title | Status | Lands at |
+| ADR | Title | Status | Landed at |
 |---|---|---|---|
 | 0010 | Playbook v0.4.0 adoption + fork relationship | Accepted (2026-06-15) | Step 6.1 |
-| 0011 | 127.0.0.1 default binding, opt-in external | Proposed | Step 6.2 |
+| 0011 | 127.0.0.1 default binding, opt-in external | Accepted (2026-06-15) | Step 6.2 |
 
 ### Out of scope for v0.6.0
 
@@ -167,8 +175,14 @@ git remote add upstream https://github.com/chyun-code/claude-code-headless-serve
   cloning a fork, immediately run `gh repo set-default <owner>/<repo>`
   before any `gh issue|pr` command.
 - **Upstream `Bun.serve({port})` with no `hostname`** binds to
-  `0.0.0.0` by default — LAN-exposable. Step 6.2 fixes this. Any future
-  Bun.serve usage in this repo must pin `hostname` explicitly.
+  `0.0.0.0` by default — LAN-exposable. Fixed in ADR 0011 + canary CI
+  job (`bind-canary`). Any future `Bun.serve` usage in this repo must
+  pin `hostname` explicitly or use the same env-fallback pattern.
+- **Playbook `pre-push-hook.sh` uses `task --color=never`** which
+  breaks on Task ≥ v3.42 (the flag became boolean). Local hook patched
+  to `NO_COLOR=1 task --list`. **Upstream playbook needs the same
+  fix** — file an issue on `esyjy/playbook` so the next
+  `task hooks:install` doesn't reintroduce the bug.
 
 ---
 
