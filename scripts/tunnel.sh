@@ -11,7 +11,23 @@ set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
-INSTALL_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+# POSIX-safe script directory resolution. BSD readlink (macOS) historically
+# did not support -f, and even on newer macOS the -f semantics differ from
+# GNU's. Manual loop works on macOS, Linux, and BusyBox alike.
+resolve_script_dir() {
+  src=$1
+  while [ -L "$src" ]; do
+    target=$(readlink "$src")
+    case $target in
+      /*) src=$target ;;
+      *)  src="$(cd "$(dirname "$src")" && pwd)/$target" ;;
+    esac
+  done
+  cd "$(dirname "$src")" && pwd
+}
+
+SCRIPT_DIR=$(resolve_script_dir "$0")
+INSTALL_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 CONF="$INSTALL_DIR/tunnel.conf"
 
 if [ -f "$CONF" ]; then
