@@ -2,7 +2,7 @@
 # Claude Code Headless Server — wrapper script v1.2
 # ADR 0003: Single-directory deployment, clean uninstall
 # ADR 0008: OpenCode daemon registration
-# Source: https://github.com/chyun-code/claude-code-headless-server
+# Source: https://github.com/esyjy/claude-code-headless-server
 
 set -euo pipefail
 
@@ -77,7 +77,7 @@ case "$cmd" in
       git -C "$SERVER_HOME" pull --ff-only 2>/dev/null || true
     else
       echo "==> Cloning..."
-      git clone --depth 1 https://github.com/chyun-code/claude-code-headless-server.git "$SERVER_HOME"
+      git clone --depth 1 https://github.com/esyjy/claude-code-headless-server.git "$SERVER_HOME"
     fi
     cd "$SERVER_HOME"
     echo "==> Installing dependencies..."
