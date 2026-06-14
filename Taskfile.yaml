@@ -1,0 +1,85 @@
+# Claude Code Headless Server — Taskfile
+#
+# Playbook v0.4.0 base Taskfile (Node/TypeScript) + project-specific tasks.
+# This file is the uniform task interface; package.json scripts mirror a
+# subset for the `bun run <name>` ergonomics already in use.
+
+version: '3'
+
+vars:
+  PLAYBOOK_DIR: '{{.PLAYBOOK_DIR | default "~/Documents/playbook"}}'
+
+tasks:
+  doctor:
+    desc: Verify environment (Bun, Claude Code CLI, gh)
+    cmds:
+      - bun --version
+      - claude --version
+      - gh --version
+      - task --version
+
+  fmt:
+    desc: Format with prettier (if installed)
+    cmds:
+      - 'npx --yes prettier --write "src/**/*.ts" "docs/**/*.md" || echo "(prettier not installed; skipping)"'
+
+  lint:
+    desc: Typecheck (Bun preferred; npm fallback for non-Bun hosts)
+    cmds:
+      - |
+        if command -v bun >/dev/null 2>&1; then
+          bun run tsc --noEmit
+        else
+          echo "→ Bun not installed; using npm-installed tsc"
+          if [ ! -x node_modules/.bin/tsc ]; then
+            npm install --silent --no-save typescript@5.8.3 @types/bun@1.3.4 hono@4.10.7
+          fi
+          node_modules/.bin/tsc --noEmit
+        fi
+
+  test:
+    desc: Integration test (real Claude Code invocation)
+    cmds:
+      - bash scripts/test-opencode-integration.sh
+
+  test:unit:
+    desc: 'Unit tests — Phase 7 seam, no test framework yet'
+    cmds:
+      - 'echo "Phase 7 seam: unit test framework not yet introduced. See docs/PROJECT-POLICY.md overrides."'
+
+  verify:
+    desc: Lint + integration test (pre-push gate)
+    cmds:
+      - task: lint
+      - task: test
+
+  serve:
+    desc: Start the server in foreground (default 127.0.0.1)
+    cmds:
+      - bun run src/index.ts
+
+  serve:lan:
+    desc: Start the server bound to all interfaces (explicit opt-in, ADR 0011)
+    cmds:
+      - CLAUDE_SERVER_HOST=0.0.0.0 bun run src/index.ts
+
+  hooks:install:
+    desc: Install playbook pre-push hook
+    cmds:
+      - cp {{.PLAYBOOK_DIR}}/templates/pre-push-hook.sh .git/hooks/pre-push
+      - chmod +x .git/hooks/pre-push
+
+  adr:new:
+    desc: 'Create the next-numbered ADR file (usage: task adr:new -- "short-title")'
+    cmds:
+      - bash {{.PLAYBOOK_DIR}}/scripts/adr-new.sh "{{.CLI_ARGS}}"
+
+  session:archive:
+    desc: Archive the active Claude session to session-management repo
+    cmds:
+      - bash {{.PLAYBOOK_DIR}}/scripts/archive-session.sh
+
+  compaction:defend:
+    desc: Pre-compaction defense (Playbook §8.7)
+    cmds:
+      - bash {{.PLAYBOOK_DIR}}/scripts/defend-compaction.sh

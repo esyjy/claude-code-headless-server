@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-line installer for Claude Code Headless Server
-# Usage: curl -fsSL https://raw.githubusercontent.com/chyun-code/claude-code-headless-server/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/esyjy/claude-code-headless-server/main/install.sh | bash
 
 set -euo pipefail
 
@@ -42,7 +42,7 @@ if [[ -d "$INSTALL_DIR" ]]; then
   git pull --ff-only origin main 2>/dev/null || true
 else
   echo "==> Cloning into $INSTALL_DIR..."
-  git clone --depth 1 https://github.com/chyun-code/claude-code-headless-server.git "$INSTALL_DIR"
+  git clone --depth 1 https://github.com/esyjy/claude-code-headless-server.git "$INSTALL_DIR"
 fi
 
 cd "$INSTALL_DIR"

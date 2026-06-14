@@ -1,0 +1,64 @@
+name: ci
+
+# macOS-only matrix per PROJECT-POLICY.md "Project-specific overrides"
+# (single-OS exemption). Target install platform is the maintainer's
+# macbook. Add ubuntu-latest if a Linux contributor shows up.
+
+on:
+  push:
+    branches: [main, 'phase-*', 'hotfix/*']
+  pull_request:
+    branches: [main, 'phase-*']
+
+jobs:
+  typecheck:
+    name: typecheck (macos-latest, Bun)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run tsc --noEmit
+
+  bind-canary:
+    name: bind-canary (127.0.0.1 default — ADR 0011)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Start server in background
+        run: |
+          PORT=14096 bun run src/index.ts &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+          # Give Bun a moment to bind.
+          for i in 1 2 3 4 5; do
+            if lsof -nP -iTCP:14096 -sTCP:LISTEN >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+      - name: Assert 127.0.0.1 binding
+        run: |
+          set -euo pipefail
+          listening=$(lsof -nP -iTCP:14096 -sTCP:LISTEN | tail -n +2 || true)
+          echo "$listening"
+          if [ -z "$listening" ]; then
+            echo "::error::server did not bind to :14096"
+            exit 1
+          fi
+          # ADR 0011 canary: must NOT see *:14096 (wildcard) — must be 127.0.0.1 only.
+          if echo "$listening" | grep -E '(\*|0\.0\.0\.0):14096' >/dev/null; then
+            echo "::error::ADR 0011 violated — server bound to wildcard/0.0.0.0 by default"
+            exit 1
+          fi
+          if ! echo "$listening" | grep -E '127\.0\.0\.1:14096' >/dev/null; then
+            echo "::error::server did not bind to 127.0.0.1"
+            exit 1
+          fi
+          echo "✓ 127.0.0.1 binding confirmed"
+      - name: Stop server
+        if: always()
+        run: kill ${SERVER_PID:-0} 2>/dev/null || true

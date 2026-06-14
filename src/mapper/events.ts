@@ -149,8 +149,8 @@ export function* mapClaudeToOpenCode(
             finish: event.subtype === "success" ? "end_turn" : "error",
             cost: event.total_cost_usd,
             tokens: {
-              input: event.usage?.input_tokens ?? 0,
-              output: event.usage?.output_tokens ?? 0,
+              input: (event.usage as { input_tokens?: number } | undefined)?.input_tokens ?? 0,
+              output: (event.usage as { output_tokens?: number } | undefined)?.output_tokens ?? 0,
               reasoning: 0,
               cache: { read: 0, write: 0 },
             },

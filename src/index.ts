@@ -93,10 +93,20 @@ app.onError((err, c) => {
 });
 
 const port = parseInt(process.env.PORT ?? "4096");
-console.error("[server] Claude Code Headless Server starting on port", port);
+// ADR 0011: default to 127.0.0.1 so the server is not LAN-exposed.
+// Explicit opt-in for external binding via CLAUDE_SERVER_HOST=0.0.0.0
+// (or a specific interface address). Bun.serve's default hostname is
+// 0.0.0.0; not setting this would silently expose bypassPermissions to
+// the local network.
+const hostname = process.env.CLAUDE_SERVER_HOST ?? "127.0.0.1";
+console.error(
+  "[server] Claude Code Headless Server starting on",
+  `${hostname}:${port}`,
+);
 
 Bun.serve({
   port,
+  hostname,
   idleTimeout: 0, // disable idle timeout for long-lived SSE
 
   fetch(req, server) {

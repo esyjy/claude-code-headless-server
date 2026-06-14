@@ -5,3 +5,6 @@ dist/
 .env
 .env.local
 /tmp/
+
+# Claude Code session id (per-machine, gitignored per Playbook §8.1)
+.claude-session-id

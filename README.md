@@ -2,8 +2,14 @@
 
 Programmable HTTP API for Claude Code — semantic integration with OpenTUI. Permission modes, PTY WebSocket proxy, slash commands, tool execution, multi-turn sessions, and clean single-directory deployment.
 
-> **v0.5.0** — Phase 5: `claude --opencode` seamless integration. OpenCode daemon registration, Basic Auth, one-command TUI launch. Full 18-group API surface. Connect OpenTUI with `claude-headless-server tui`. Phase 3: OpenTUI compatibility verified. Phase 2: PTY WebSocket + slash commands. Phase 1: core HTTP API + SSE relay + multi-turn + permission mapping.  
-> See [Releases](https://github.com/chyun-code/claude-code-headless-server/releases) | [ADR Index](docs/adr/) | [Issues](https://github.com/chyun-code/claude-code-headless-server/issues)
+> **v0.6.0** — Playbook v0.4.0 adoption + macbook hardening. `127.0.0.1`
+> default binding (ADR 0011, CI-enforced canary), macOS-portable
+> `tunnel.sh`, opt-in artifacts (PROJECT-POLICY, SESSION-CONTEXT, ADR
+> 0010), macOS CI lane, branch protection, label taxonomy.
+>
+> Inherits ADRs 0001~0009 from upstream `chyun-code/...@v0.5.0`.
+>
+> See [Releases](https://github.com/esyjy/claude-code-headless-server/releases) | [ADR Index](docs/adr/) | [Issues](https://github.com/esyjy/claude-code-headless-server/issues) | [Playbook](https://github.com/esyjy/playbook)
 
 ## Architecture
 
@@ -23,19 +29,36 @@ Each prompt is a fresh `claude -p` invocation. Session continuity via `--resume`
 
 ```bash
 # One line — everything in ~/.claude-headless-server
-curl -fsSL https://raw.githubusercontent.com/chyun-code/claude-code-headless-server/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/esyjy/claude-code-headless-server/main/install.sh | bash
 ```
 
 Or manually:
 
 ```bash
-git clone https://github.com/chyun-code/claude-code-headless-server.git ~/.claude-headless-server
+git clone https://github.com/esyjy/claude-code-headless-server.git ~/.claude-headless-server
 cd ~/.claude-headless-server
 bun install
 ./scripts/claude-headless-server.sh start
 ```
 
 > **Requirements:** Bun, Claude Code CLI (authenticated). Non-root user recommended for `bypassPermissions` mode.
+
+### Network exposure
+
+The server binds to **`127.0.0.1`** by default (ADR 0011) — accessible
+only from the same host. To expose to the LAN, set
+`CLAUDE_SERVER_HOST` explicitly:
+
+```bash
+CLAUDE_SERVER_HOST=0.0.0.0 claude-headless-server start         # all interfaces
+CLAUDE_SERVER_HOST=10.0.0.5 claude-headless-server start         # specific NIC
+```
+
+Combine with `claude-headless-server tui` (which sets up OpenCode Basic
+Auth, ADR 0009) before exposing externally. Plain `start` with
+`CLAUDE_SERVER_HOST=0.0.0.0` and no Basic Auth means **anyone on the
+network can trigger `bypassPermissions` execution** on the host —
+intentional only if you know what that means.
 
 ## Usage
 
@@ -86,7 +109,7 @@ claude-headless-server uninstall
 
 **Removes ONLY `~/.claude-headless-server`.** No other files touched. No scattered config. No /etc pollution. No shell rc modifications. No irreversible system changes. Just one `rm -rf` of a single directory.
 
-## API (v0.5.0)
+## API (v0.6.0)
 
 | Endpoint | Status | Description |
 |---|---|---|
@@ -151,6 +174,10 @@ Mode switches via `PATCH /api/session/:id {permissionMode:acceptEdits}` or per-p
 | [0005](docs/adr/0005-opentui-compatibility.md) | OpenTUI Compatibility Interface |
 | [0006](docs/adr/0006-opencode-protocol-integration.md) | OpenCode Backend Protocol Integration |
 | [0007](docs/adr/0007-opencode-compatibility-layer.md) | OpenCode API Compatibility Layer |
+| [0008](docs/adr/0008-opencode-daemon-registration.md) | OpenCode Daemon Registration |
+| [0009](docs/adr/0009-basic-auth-compatibility.md) | Basic Auth Compatibility |
+| [0010](docs/adr/0010-playbook-v0.4.0-adoption.md) | Playbook v0.4.0 Adoption + Fork Relationship |
+| [0011](docs/adr/0011-localhost-default-binding.md) | `127.0.0.1` Default Binding, Opt-in External |
 
 ## License
 
