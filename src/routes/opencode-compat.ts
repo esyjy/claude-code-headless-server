@@ -4,6 +4,7 @@
 // ADR 0006: Protocol adapter — maps OpenCode API to our internal API.
 
 import { Hono } from "hono";
+import { readdir, stat } from "node:fs/promises";
 
 const COMPAT_VERSION = "0.3.0";
 
@@ -152,10 +153,12 @@ export const fsRoutes = new Hono()
   .get("/api/fs/list", async (c) => {
     const dir = c.req.query("path") ?? ".";
     try {
-      const entries = [];
-      for await (const entry of Bun.file(dir).isDirectory() ? Bun.readdir(dir) : []) {
-        entries.push({ name: entry, path: `${dir}/${entry}` });
-      }
+      const stats = await stat(dir);
+      if (!stats.isDirectory()) return c.json({ data: [] });
+      const entries = (await readdir(dir)).map((entry) => ({
+        name: entry,
+        path: `${dir}/${entry}`,
+      }));
       return c.json({ data: entries });
     } catch {
       return c.json({ data: [] });
@@ -163,14 +166,9 @@ export const fsRoutes = new Hono()
   })
   .get("/api/fs/find", async (c) => {
     const pattern = c.req.query("pattern") ?? "";
-    // Basic glob search in current directory
+    const needle = pattern.replace("*", "");
     try {
-      const results: string[] = [];
-      for await (const entry of Bun.readdir(".")) {
-        if (entry.includes(pattern.replace("*", ""))) {
-          results.push(entry);
-        }
-      }
+      const results = (await readdir(".")).filter((entry) => entry.includes(needle));
       return c.json({ data: results });
     } catch {
       return c.json({ data: [] });
