@@ -7,12 +7,13 @@
 > below contradicts what you observe in the repo, the document is wrong
 > — fix it before you fix anything else.
 
-> Last updated: 2026-06-15 by Step 6.5 release prep.
-> **main HEAD**: pending merge of phase-6 (this commit).
-> **Latest tag**: `v0.6.0` will land at the merge commit.
-> **Next pickup**: post-merge — run `bash install.sh` on macbook + verify
-> `lsof` shows 127.0.0.1 only. Phase 7 scope TBD (likely: unit test
-> framework, see PROJECT-POLICY overrides).
+> Last updated: 2026-06-15 by phase-7 kickoff.
+> **main HEAD**: `e554158` `Merge phase-6: v0.6.0 — Playbook v0.4.0 adoption + macbook hardening`.
+> **Latest tag**: `v0.6.0` (2026-06-15).
+> **Active branch**: `phase-7` — OpenCode TUI integration (real this time).
+> **Next pickup**: Step 7.1 — protocol probe (capture opencode attach
+> traffic, write `docs/opencode-protocol.md`). See plan
+> [`docs/plans/phase-7-opencode-tui-integration.md`](plans/phase-7-opencode-tui-integration.md).
 
 ---
 
@@ -27,15 +28,14 @@
 
 **Next pickup**
 
-1. **Post-merge install test** — on the maintainer's macbook:
-   `bash install.sh` (or `bash scripts/claude-headless-server.sh install`),
-   then `claude-headless-server start`, then `lsof -nP -iTCP:4096
-   -sTCP:LISTEN` must show **`127.0.0.1:4096` only** (no `*:4096`).
-2. **Phase 7 planning** — see PROJECT-POLICY.md "Project-specific
-   overrides" for the deferred-scope candidates (unit test framework
-   most likely first).
-3. **Upstream cleanup** — close `chyun-code/...#18` (mis-filed by this
-   session before `gh repo set-default` was configured).
+1. **Step 7.1 — protocol probe**. Capture `opencode attach` traffic
+   against real `opencode serve` (with `--print-logs --log-level
+   DEBUG`). Document every path × method × payload × response in
+   `docs/opencode-protocol.md`. No assumption — only measurement.
+2. **Step 7.2 — path scheme migration** (depends on 7.1).
+3. **Step 7.3 — event schema parity** (depends on 7.1).
+4. **Phase 6 closeout — upstream**: close `chyun-code/...#18`
+   (mis-filed during fork bootstrap).
 
 **Plan file**: `docs/plans/phase-6-playbook-adoption.md`.
 
@@ -83,17 +83,22 @@ v0.5.0 on 2026-06-14. ADRs 0001~0009 inherited.
 
 ### Active branch
 
-- `main` — at v0.6.0.
+- `phase-7` — OpenCode TUI integration. Plan:
+  [`docs/plans/phase-7-opencode-tui-integration.md`](plans/phase-7-opencode-tui-integration.md).
 
-### Step status (phase-6, closed)
+### Step status (phase-6, closed; phase-7, kickoff)
 
-| Step | Deliverable | Status |
-|---|---|---|
-| 6.1 | Opt-in scaffold + ADR 0010 | ✅ shipped |
-| 6.2 | Bun.serve hostname pin + ADR 0011 | ✅ shipped |
-| 6.3 | macOS tunnel.sh compat | ✅ shipped |
-| 6.4 | Taskfile + CI + pre-push + labels | ✅ shipped |
-| 6.5 | Merge + v0.6.0 tag + branch protection | 🚧 in-progress |
+| Phase | Step | Deliverable | Status |
+|---|---|---|---|
+| 6 | all | v0.6.0 hardening | ✅ shipped 2026-06-15 |
+| 7 | 7.1 | Protocol probe + docs/opencode-protocol.md | 🚧 in-progress |
+| 7 | 7.2 | Path scheme migration | pending |
+| 7 | 7.3 | Event schema parity | pending |
+| 7 | 7.4 | automode permission | pending |
+| 7 | 7.5 | `chs` CLI alias | pending |
+| 7 | 7.6 | E2E canary in CI | pending |
+| 7 | 7.7 | ADR cleanup | pending |
+| 7 | 7.8 | Merge + v0.7.0 tag | pending |
 
 ---
 
@@ -183,6 +188,20 @@ git remote add upstream https://github.com/chyun-code/claude-code-headless-serve
   to `NO_COLOR=1 task --list`. **Upstream playbook needs the same
   fix** — file an issue on `esyjy/playbook` so the next
   `task hooks:install` doesn't reintroduce the bug.
+- **2026-06-15 — opencode-compat layer is at the wrong path prefix.**
+  Live probe (during v0.6.0 verification) showed `opencode attach`
+  hits bare paths (`/global/event`, `/config`, `/agent`, `/provider`,
+  `/config/providers`, `/experimental/console`, `/project/current`,
+  `/path`), but our routes are at `/api/*`. ADR 0007 (and the daemon
+  registration claim in ADR 0008) were authored from assumption, not
+  measurement, and never worked end-to-end. v0.6.0's macbook-safety
+  goal is intact — but the "TUI uses our backend" claim was always
+  false. Phase 7 fixes this from the protocol up; ADRs 0006~0009
+  will be superseded in Step 7.7.
+- **`/api/health` response still says `version: 0.5.0`** even on the
+  installed v0.6.0 build. `src/routes/health.ts` hard-codes or reads
+  a stale `package.json`. Track separately (Phase 7 surface or
+  hotfix candidate).
 
 ---
 
