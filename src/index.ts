@@ -26,6 +26,7 @@ import {
   credentialRoutes,
   projectCopyRoutes,
 } from "./routes/opencode-compat";
+import { opencodeBareRoutes } from "./routes/opencode-bare";
 
 export { eventBus };
 
@@ -86,6 +87,11 @@ app.route("/", referenceRoutes);
 app.route("/", integrationRoutes);
 app.route("/", credentialRoutes);
 app.route("/", projectCopyRoutes);
+
+// OpenCode TUI bare-path discovery surface (Step 7.2 of phase-7).
+// Mounted AFTER /api/* so the bare paths only handle requests that
+// didn't match the wrapped surface. See docs/opencode-protocol.md.
+app.route("/", opencodeBareRoutes);
 
 app.onError((err, c) => {
   console.error("[server] error:", err);
