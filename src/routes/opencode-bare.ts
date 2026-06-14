@@ -120,9 +120,13 @@ const providerRoute = new Hono().get("/provider", (c) => {
 });
 
 // --- GET /config/providers ---
-// Same data as /provider but a different envelope. We MUST NOT include
-// real API keys here — the real opencode response leaks the user's key,
-// but our backend (Claude Code CLI) authenticates separately.
+// Same data as /provider but a different envelope. TUI's sync store sets:
+//   provider          = providers      (array)
+//   provider_default  = default        (map { providerID: defaultModelID })
+// from THIS response (sst/opencode packages/tui/src/context/sync.tsx:476).
+// Missing `default` here is what crashes the TUI's provider component
+// with `provider_default[q.id]` undefined. Keys intentionally omitted —
+// claude CLI authenticates separately, no key needed.
 const configProvidersRoute = new Hono().get("/config/providers", (c) => {
   return c.json({
     providers: [
@@ -131,7 +135,6 @@ const configProvidersRoute = new Hono().get("/config/providers", (c) => {
         name: "Anthropic",
         source: "claude-code",
         env: [],
-        // key intentionally omitted (claude CLI handles auth)
         options: {},
         models: {
           "claude-sonnet-4-5": {
@@ -152,6 +155,7 @@ const configProvidersRoute = new Hono().get("/config/providers", (c) => {
         },
       },
     ],
+    default: { anthropic: "claude-sonnet-4-5" },
   });
 });
 

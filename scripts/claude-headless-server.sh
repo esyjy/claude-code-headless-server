@@ -243,7 +243,10 @@ case "$cmd" in
     version=$(detect_opencode_version)
     registration_id=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "claude-code-headless-$(date +%s)")
 
-    # Write OpenCode daemon registration
+    # Write OpenCode daemon registration (kept for compatibility with tools
+    # that watch this file; opencode itself does NOT read it as a backend
+    # pointer — that was the ADR 0008 mistake. The actual backend swap is
+    # via `opencode attach <url>` below.
     cat > "$OPENCODE_SERVER_JSON" <<REGEOF
 {
   "id": "$registration_id",
@@ -254,11 +257,12 @@ case "$cmd" in
 REGEOF
     chmod 600 "$OPENCODE_SERVER_JSON"
 
-    echo "==> Registered with OpenCode daemon: http://localhost:$PORT"
-    echo "==> Launching OpenTUI..."
+    echo "==> Server: http://localhost:$PORT"
+    echo "==> Launching OpenTUI via 'opencode attach' (Phase 7 fix)..."
 
-    # Exec opencode default command (opens OpenTUI)
-    exec opencode
+    # The actual backend swap: opencode attach <url> with Basic Auth.
+    # See docs/opencode-protocol.md and ADR 0008's correction (Step 7.7).
+    exec opencode attach "http://localhost:$PORT" -u opencode -p "$password"
     ;;
 
   uninstall)
