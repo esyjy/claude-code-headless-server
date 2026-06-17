@@ -559,19 +559,716 @@ This is what makes our adapter survive Claude Code updates without recompilation
 
 ---
 
-## 11. Open TODOs (next research turn)
+## 11. Hooks (complete reference — Round 2)
 
-The catalog above is complete for the surfaces we've fetched. Remaining fetches before mapping work begins:
+From `code.claude.com/docs/en/hooks` (full fetch).
 
-1. `code.claude.com/docs/en/hooks.md` — exhaustive hook event payload shapes (needed for opencode permission/question route mapping)
-2. `code.claude.com/docs/en/skills.md` — skill manifest format (needed for `/skill` route)
-3. `code.claude.com/docs/en/sub-agents.md` — agent frontmatter fields
-4. `code.claude.com/docs/en/mcp.md` and `mcp-quickstart.md` — MCP config persistence
-5. `code.claude.com/docs/en/settings.md` — full settings.json schema (needed because opencode `/config` is a passthrough surface)
-6. `code.claude.com/docs/en/sessions.md` — session lifecycle semantics
-7. `code.claude.com/docs/en/agent-view.md` — background-agent surface (needed for `claude agents` ↔ `/session` mapping)
-8. `code.claude.com/docs/en/headless.md` — `-p` mode specifics
-9. `code.claude.com/docs/en/auto-mode-config.md` — auto mode trust environment config
-10. `code.claude.com/docs/en/env-vars.md` — env var canonical list with semantics
+### 11.1 Event list with matcher / block / transform capability
 
-After these, the parallel `opencode-surface.md` catalog is the next deliverable.
+| Event | Matcher target | Can block | Can transform input | Can transform output |
+|---|---|---|---|---|
+| `SessionStart` | start mode (`startup`, `resume`, `clear`, `compact`) | No | — | adds `additionalContext` |
+| `Setup` | trigger (`init`, `maintenance`) | No (exit 2 shows stderr) | — | adds `additionalContext` |
+| `SessionEnd` | end reason (`clear`, `resume`, `logout`, `prompt_input_exit`) | No | — | — |
+| `UserPromptSubmit` | none | Yes (`decision: "block"`) | — | — |
+| `UserPromptExpansion` | command name | Yes | — | — |
+| `PreToolUse` | tool name | Yes (`permissionDecision: "deny"`) | Yes (`updatedInput`) | — |
+| `PostToolUse` | tool name | Yes | — | Yes (`updatedToolOutput`) |
+| `PostToolUseFailure` | tool name | Yes | — | — |
+| `PostToolBatch` | none | Yes | — | — |
+| `PermissionRequest` | tool name | Yes (`behavior: "deny"`) | Yes (`updatedInput`) | — |
+| `PermissionDenied` | tool name | No (already denied) | — | `retry: true` allows model retry |
+| `Stop` | none | Yes | — | adds `additionalContext` |
+| `StopFailure` | error type | No | — | — |
+| `SubagentStart` | agent type | No | — | adds `additionalContext` |
+| `SubagentStop` | agent type | Yes | — | adds `additionalContext` |
+| `PreCompact` | trigger (`manual`, `auto`) | Yes | — | — |
+| `PostCompact` | trigger | No | — | — |
+| `InstructionsLoaded` | load reason (`session_start`, `nested_traversal`, `path_glob_match`, `include`, `compact`) | No | — | — |
+| `ConfigChange` | source (`user_settings`, `project_settings`, `local_settings`, `policy_settings`, `skills`) | Yes | — | — |
+| `Notification` | type (`permission_prompt`, `auth_success`, `elicitation_dialog`) | No | — | — |
+| `WorktreeCreate` | none | Yes (failure or missing path) | — | returns `worktreePath` |
+| `WorktreeRemove` | none | No | — | — |
+| `CwdChanged` | none | No | — | — |
+| `FileChanged` | literal filenames (NOT regex), pipe-separated | No | — | — |
+| `Elicitation` | MCP server name | Yes (`action: "decline" \| "cancel"`) | — | — |
+| `ElicitationResult` | MCP server name | Yes | — | overrides `content` |
+| `MessageDisplay` | none | No | — | `displayContent` (screen only, not transcript) |
+| `TaskCreated` | none | No | — | — |
+| `TaskCompleted` | none | No | — | — |
+| `TeammateIdle` | none | No | — | — |
+
+### 11.2 Common input/output fields (all events)
+
+```jsonc
+// Input (any event)
+{
+  "session_id": "string",
+  "transcript_path": "string",
+  "cwd": "string",
+  "permission_mode": "default|plan|acceptEdits|auto|dontAsk|bypassPermissions",
+  "effort": { "level": "low|medium|high|xhigh|max" },
+  "hook_event_name": "string",
+  "agent_id": "string (only in subagent context)",
+  "agent_type": "string"
+}
+
+// Output (any event, top-level)
+{
+  "continue": true,            // false stops Claude entirely
+  "stopReason": "string",      // shown when continue=false
+  "suppressOutput": false,     // hides hook stdout from transcript
+  "systemMessage": "string",   // warning to user
+  "terminalSequence": "string" // OSC 0/1/2/9/99/777 or BEL
+}
+```
+
+### 11.3 Selected event-specific shapes
+
+(Full list saved verbatim in this turn's transcript; key ones below — they drive opencode `permission`/`question`/`message` route mapping.)
+
+**PreToolUse output (decisions + transforms):**
+```jsonc
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow | deny | ask | defer",
+    "permissionDecisionReason": "string",
+    "updatedInput": { /* replaces tool arguments */ },
+    "additionalContext": "string"
+  }
+}
+```
+
+**PermissionRequest output (the ladder users hit in TUI):**
+```jsonc
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PermissionRequest",
+    "decision": {
+      "behavior": "allow | deny",
+      "updatedInput": { /* optional */ },
+      "permissionRules": ["pattern string"]
+    }
+  }
+}
+```
+
+**Elicitation (MCP-driven user input forms):**
+```jsonc
+// Input
+{
+  "request": {
+    "type": "string (form field type)",
+    "name": "string",
+    "label": "string",
+    "required": "boolean"
+  }
+}
+// Output
+{
+  "hookSpecificOutput": {
+    "action": "accept | decline | cancel",
+    "content": { "field_name": "value" }
+  }
+}
+```
+
+### 11.4 Hook handler types (5)
+
+| `type` | Fields | Notes |
+|---|---|---|
+| `command` | `command`, `args?`, `async?`, `asyncRewake?`, `shell?` | Args present = exec form (no shell tokenizing) |
+| `http` | `url`, `headers?`, `allowedEnvVars?` | 2xx empty=success; 2xx+text=context; 2xx+JSON=parsed |
+| `mcp_tool` | `server`, `tool`, `input` (supports `${...}` substitution) | — |
+| `prompt` | `prompt` (with `$ARGUMENTS`), `model?` | Defaults to fast model |
+| `agent` | `prompt`, `model?` | Spawns subagent; experimental |
+
+Common across all: `if?`, `timeout?` (default 600s; 30s for UserPromptSubmit; 10s for MessageDisplay), `statusMessage?`, `once?` (skills only).
+
+### 11.5 Settings.json shape for hooks
+
+```jsonc
+{
+  "hooks": {
+    "EventName": [
+      {
+        "matcher": "tool_name or pattern",
+        "hooks": [
+          { "type": "command", "command": "...", "args": [] },
+          { "type": "http", "url": "...", "headers": {...}, "allowedEnvVars": [...] },
+          { "type": "mcp_tool", "server": "...", "tool": "...", "input": {...} },
+          { "type": "prompt", "prompt": "Is X safe? $ARGUMENTS" }
+        ]
+      }
+    ]
+  },
+  "disableAllHooks": false
+}
+```
+
+### 11.6 Path placeholders
+
+- `${CLAUDE_PROJECT_DIR}` — project root
+- `${CLAUDE_PLUGIN_ROOT}` — plugin install dir (changes on update)
+- `${CLAUDE_PLUGIN_DATA}` — plugin persistent data (survives updates)
+- All three also exported as env vars on spawned processes
+- Bash hooks get `CLAUDE_ENV_FILE` to write `export …` lines that persist into subsequent Bash commands
+
+### 11.7 Matcher syntax
+
+- `"*"`, `""`, omitted → match all
+- letters/digits/`_`/`|` only → exact string or `|`-separated list
+- any other character → JavaScript regex
+- MCP tools: `mcp__<server>__<tool>` (regex example `mcp__memory__.*`)
+- `if` field on handlers uses permission-rule syntax; only evaluated on tool events
+
+### 11.8 Exit codes & HTTP semantics
+
+| Mechanism | Code | Behavior |
+|---|---|---|
+| Command exit | `0` | Stdout parsed as JSON for decisions |
+| Command exit | `2` | Blocking error; stderr shown |
+| Command exit | other | Non-blocking; stderr in debug log + first line in transcript |
+| HTTP | `2xx` empty | Success |
+| HTTP | `2xx` text | Success, context-added |
+| HTTP | `2xx` JSON | Decision parsed |
+| HTTP | other / timeout | Non-blocking |
+
+---
+
+## 12. Sessions & headless mode (Round 3)
+
+From `sessions.md`, `agent-sdk/sessions.md`, `headless.md`, `agent-sdk/streaming-output.md`.
+
+### 12.1 Storage model
+
+- **Path:** `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`
+- `<encoded-cwd>` = absolute working directory, every non-alphanumeric → `-` (e.g., `/Users/me/proj` → `-Users-me-proj`)
+- Override base with `CLAUDE_CONFIG_DIR` env var: `$CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/*.jsonl`
+- Each line = one JSON object (message, tool use, metadata)
+- Default cleanup: 30 days (configurable via `cleanupPeriodDays`)
+- Disable persistence: `CLAUDE_CODE_SKIP_PROMPT_HISTORY` env or `--no-session-persistence` flag
+
+### 12.2 Resume / fork / continue (CLI + SDK parity)
+
+| Concept | CLI | SDK (TypeScript) |
+|---|---|---|
+| Continue most recent in cwd | `claude --continue` or `-c` | `options.continue: true` |
+| Resume by ID | `claude --resume <id>` | `options.resume: "<id>"` |
+| Resume by name | `claude --resume <name>` | (CLI only) |
+| Fork from resumed | `--fork-session` with `-r` / `-c` | `options.forkSession: true` |
+| Resume from PR | `--from-pr <num\|url>` | (CLI only) |
+| Suppress disk write | `--no-session-persistence` (print mode) | `options.persistSession: false` |
+| Pin session ID | `--session-id <uuid>` | `options.sessionId: "<uuid>"` |
+
+### 12.3 SDKSessionInfo (used by listSessions / getSessionInfo)
+
+```typescript
+type SDKSessionInfo = {
+  sessionId: string;
+  summary: string;
+  lastModified: number;       // ms epoch
+  fileSize?: number;
+  customTitle?: string;       // settable via renameSession()
+  firstPrompt?: string;
+  gitBranch?: string;
+  cwd?: string;
+  tag?: string;               // settable via tagSession()
+  createdAt?: number;
+};
+```
+
+### 12.4 Stream-json event reference (the canonical wire format for `-p --output-format stream-json`)
+
+#### `system/init` (first event of the stream)
+
+```jsonc
+{
+  "type": "system",
+  "subtype": "init",
+  "session_id": "uuid",
+  "model": "claude-sonnet-4-6",
+  "tools": ["Read", "Bash", ...],
+  "mcp_servers": [...],
+  "plugins": [{ "name": "...", "path": "..." }],
+  "plugin_errors": [{ "plugin": "...", "type": "...", "message": "..." }]
+}
+```
+
+#### `system/api_retry`
+
+```jsonc
+{
+  "type": "system",
+  "subtype": "api_retry",
+  "attempt": 1,
+  "max_retries": 5,
+  "retry_delay_ms": 2000,
+  "error_status": 503,
+  "error": "rate_limit | authentication_failed | oauth_org_not_allowed | billing_error | overloaded | invalid_request | model_not_found | server_error | max_output_tokens | unknown",
+  "uuid": "string",
+  "session_id": "string"
+}
+```
+
+#### `system/plugin_install` (only when `CLAUDE_CODE_SYNC_PLUGIN_INSTALL` set)
+
+```jsonc
+{
+  "type": "system",
+  "subtype": "plugin_install",
+  "status": "started | installed | failed | completed",
+  "name": "marketplace-name",
+  "error": "...",
+  "uuid": "string",
+  "session_id": "string"
+}
+```
+
+#### `stream_event` (raw API streaming events, when `--include-partial-messages`)
+
+```jsonc
+{
+  "type": "stream_event",
+  "event": {
+    "type": "message_start | content_block_start | content_block_delta | content_block_stop | message_delta | message_stop",
+    "delta": {
+      "type": "text_delta | input_json_delta",
+      "text": "...",         // text_delta
+      "partial_json": "..."  // input_json_delta
+    },
+    "content_block": {
+      "type": "text | tool_use",
+      "name": "Read",        // tool_use
+      "id": "toolu_..."      // tool_use
+    }
+  },
+  "parent_tool_use_id": "string | null",
+  "uuid": "UUID",
+  "session_id": "string",
+  "ttft_ms": 320              // only on message_start
+}
+```
+
+Message order with partial messages enabled:
+```
+stream_event(message_start)
+stream_event(content_block_start) text
+stream_event(content_block_delta) text_delta ×N
+stream_event(content_block_stop)
+stream_event(content_block_start) tool_use
+stream_event(content_block_delta) input_json_delta ×N
+stream_event(content_block_stop)
+stream_event(message_delta)
+stream_event(message_stop)
+assistant                          // complete AssistantMessage
+... tool executes ...
+... next turn ...
+result                             // final
+```
+
+### 12.5 Headless `-p` mode specifics
+
+- `--bare` is the recommended mode for scripts (skips hooks/LSP/plugin sync/auto-memory/CLAUDE.md auto-discovery; sets `CLAUDE_CODE_SIMPLE=1`)
+- In `--bare`, auth must be `ANTHROPIC_API_KEY` or `apiKeyHelper` via `--settings`; OAuth/keychain never read
+- Background Bash tasks killed ~5s after final result
+- Piped stdin capped at 10MB (v2.1.128+)
+- Slash skills work in `-p` mode (e.g., `claude -p "/security-review"`). Interactive dialogs like `/config` and `/login` don't
+- `--output-format json` payload includes `total_cost_usd` + per-model cost
+- `--output-format stream-json` requires `--verbose` to expose partials with `--include-partial-messages`
+
+---
+
+## 13. Settings.json complete schema (Round 3)
+
+From `code.claude.com/docs/en/settings`. ~75 top-level keys. Listed in scope/precedence groups.
+
+### 13.1 Precedence (highest → lowest)
+
+1. **Managed** (cannot be overridden) — at `/Library/Application Support/ClaudeCode/managed-settings.json` (macOS), `/etc/claude-code/managed-settings.json` (Linux/WSL), `C:\Program Files\ClaudeCode\managed-settings.json` (Windows)
+2. **CLI arguments**
+3. **Local** — `.claude/settings.local.json` (gitignored)
+4. **Project** — `.claude/settings.json` (committed)
+5. **User** — `~/.claude/settings.json`
+
+Permission rules MERGE across scopes instead of overriding.
+
+### 13.2 Hot-reload vs restart-required
+
+Hot-reload (no restart): `permissions`, `hooks`, credential helpers (`apiKeyHelper`, `awsCredentialExport`, etc). `ConfigChange` hook fires.
+
+Restart-required: `model`, `outputStyle`.
+
+### 13.3 Top-level keys (alphabetical, exhaustive)
+
+```text
+$schema, advisorModel, agent, agentPushNotifEnabled, allowAllClaudeAiMcps,
+allowedChannelPlugins, allowedHttpHookUrls, allowedMcpServers,
+allowManagedHooksOnly, allowManagedMcpServersOnly, allowManagedPermissionRulesOnly,
+alwaysThinkingEnabled, apiKeyHelper, attribution, autoCompactEnabled,
+autoMemoryDirectory, autoMemoryEnabled, autoMode, autoScrollEnabled,
+autoUpdatesChannel, availableModels, awaySummaryEnabled, awsAuthRefresh,
+awsCredentialExport, blockedMarketplaces, channelsEnabled, claudeMd,
+claudeMdExcludes, cleanupPeriodDays, companyAnnouncements, defaultShell,
+deniedMcpServers, disableAgentView, disableAllHooks, disableAutoMode,
+disableBundledSkills, disableDeepLinkRegistration, disabledMcpjsonServers,
+disableRemoteControl, disableSkillShellExecution, disableWorkflows, editorMode,
+effortLevel, enableAllProjectMcpServers, enabledMcpjsonServers, env,
+enforceAvailableModels, fallbackModel, fastModePerSessionOptIn,
+feedbackSurveyRate, fileCheckpointingEnabled, fileSuggestion, footerLinksRegexes,
+forceLoginMethod, forceLoginOrgUUID, forceRemoteSettingsRefresh,
+gcpAuthRefresh, hooks, httpHookAllowedEnvVars, includeCoAuthoredBy,
+includeGitInstructions, inputNeededNotifEnabled, language,
+maxSkillDescriptionChars, minimumVersion, model, modelOverrides,
+otelHeadersHelper, outputStyle, parentSettingsBehavior, permissions,
+plansDirectory, pluginSuggestionMarketplaces, pluginTrustMessage, policyHelper,
+preferredNotifChannel, prefersReducedMotion, prUrlTemplate, requiredMaximumVersion,
+requiredMinimumVersion, respectGitignore, showClearContextOnPlanAccept,
+showThinkingSummaries, showTurnDuration, skillListingBudgetFraction,
+skillOverrides, spinnerTipsEnabled, strictKnownMarketplaces
+```
+
+### 13.4 Enum-bound keys
+
+| Key | Allowed values | Default |
+|---|---|---|
+| `editorMode` | `normal` \| `vim` | `normal` |
+| `defaultShell` | `bash` \| `powershell` | `bash` |
+| `autoUpdatesChannel` | `stable` \| `latest` | `latest` |
+| `preferredNotifChannel` | `auto` \| `terminal_bell` \| `iterm2` \| `iterm2_with_bell` \| `kitty` \| `ghostty` \| `notifications_disabled` | `auto` |
+| `disableAutoMode` | `disable` | unset |
+| `disableDeepLinkRegistration` | `disable` | unset |
+| `forceLoginMethod` | `claudeai` \| `console` | unset |
+| `parentSettingsBehavior` | `first-wins` \| `merge` | `first-wins` |
+| `effortLevel` | `low` \| `medium` \| `high` \| `xhigh` | unset |
+| `skillOverrides[*]` | `on` \| `name-only` \| `user-invocable-only` \| `off` | — |
+
+### 13.5 Numeric
+
+| Key | Min | Max | Default |
+|---|---|---|---|
+| `cleanupPeriodDays` | 1 | — | 30 |
+| `feedbackSurveyRate` | 0 | 1 | — |
+| `skillListingBudgetFraction` | 0 | 1 | 0.01 |
+| `maxSkillDescriptionChars` | — | — | 1536 |
+
+### 13.6 Selected sub-objects
+
+```jsonc
+// permissions
+{
+  "permissions": {
+    "allow": ["Bash(npm run lint)", "Read(./src/**)"],
+    "ask":   ["WebFetch(*)"],
+    "deny":  ["Bash(rm -rf *)"]
+  }
+}
+
+// autoMode (see §14 for full semantics)
+{
+  "autoMode": {
+    "environment": ["$defaults", "prose..."],
+    "allow":       ["$defaults", "prose..."],
+    "soft_deny":   ["$defaults", "prose..."],
+    "hard_deny":   ["$defaults", "prose..."]
+  }
+}
+
+// fileSuggestion
+{
+  "fileSuggestion": { "type": "command", "command": "~/.claude/file-suggestion.sh" }
+  // OR
+  // { "type": "mcp", "serverName": "filesystem", "toolName": "search_files" }
+}
+
+// modelOverrides — alias-to-fullId override per provider
+{
+  "modelOverrides": { "claude-opus-4-6": "arn:aws:bedrock:..." }
+}
+
+// footerLinksRegexes — autolinkify ticket references
+{
+  "footerLinksRegexes": [{
+    "type": "regex",
+    "pattern": "\\b(?<key>PROJ-\\d+)\\b",
+    "url": "https://issues.example.com/browse/{key}",
+    "label": "{key}"
+  }]
+}
+
+// attribution — commit / PR signatures Claude injects
+{
+  "attribution": { "commit": "🤖 Generated with Claude Code", "pr": "" }
+}
+
+// skillOverrides — per-skill on/off
+{
+  "skillOverrides": { "legacy-context": "name-only", "deploy": "off" }
+}
+
+// policyHelper — script that returns managed policy JSON
+{
+  "policyHelper": { "path": "/path/to/helper", "timeout": 5000 }
+}
+```
+
+---
+
+## 14. Auto mode classifier config (Round 3 detail)
+
+From `auto-mode-config.md`.
+
+### 14.1 Scope
+
+| Scope | File | Use |
+|---|---|---|
+| Personal | `~/.claude/settings.json` | Personal trusted infra |
+| Project-local | `.claude/settings.local.json` | Per-project trusted services |
+| Managed | platform-specific path | Organization-wide |
+| Inline | `--settings` JSON or SDK options | Per-invocation |
+| **NOT** read from `.claude/settings.json` (shared/checked-in) — by design, repos can't grant themselves auto |
+
+Per-scope `environment / allow / soft_deny / hard_deny` arrays MERGE; developers can extend but not delete managed entries. `allow` overrides matching `soft_deny` (additive), but never `hard_deny`.
+
+### 14.2 Four arrays, four roles
+
+```jsonc
+{
+  "autoMode": {
+    "environment": [...],  // prose; what "internal/trusted" means
+    "allow":       [...],  // exceptions to soft_deny (or explicit auto-approves)
+    "soft_deny":   [...],  // blocks unless user intent or allow overrides
+    "hard_deny":   [...]   // unconditional blocks; nothing overrides
+  }
+}
+```
+
+### 14.3 `$defaults` splice
+
+Include literal string `"$defaults"` in any array to inherit built-in entries at that position. Omitting `$defaults` REPLACES the entire default list for that section — flagged as dangerous in docs.
+
+### 14.4 Inspection CLI
+
+```bash
+claude auto-mode defaults   # built-in lists as JSON
+claude auto-mode config     # effective config with merges + $defaults expanded
+claude auto-mode critique   # AI feedback on custom rules
+```
+
+### 14.5 Decision order (matches §5.4 in the permission-modes doc)
+
+```
+1. Tool-pattern allow/deny rules in settings (permissions.{allow,deny,ask})
+   → except writes to protected paths, which jump to classifier
+2. Read-only ops + cwd file edits auto-approved (except protected paths)
+3. Everything else → classifier
+4. Inside classifier:
+   - hard_deny: block, no overrides
+   - soft_deny: block unless allow matches or explicit user intent
+   - allow: override soft_deny
+   - User explicit intent (specific phrasing): override remaining soft blocks
+```
+
+### 14.6 Boundaries from conversation
+
+User's chat boundaries ("don't push", "wait until review") become block signals; re-read from transcript on each check; lost on compaction. For hard guarantees, use `permissions.deny`.
+
+### 14.7 Fallback
+
+- 3 consecutive blocks OR 20 total blocks → auto mode pauses, returns to prompting mode
+- Approving the prompted action resumes auto mode
+- In `-p` mode (non-interactive), repeated blocks abort
+- Per-action denial recorded in `/permissions` → `Recently denied` → press `r` to retry with manual approval
+- Programmatic reaction via `PermissionDenied` hook (§11.1)
+
+---
+
+## 15. Environment variables — exhaustive table (Round 3)
+
+From `env-vars.md`. Categorized; ~150 variables.
+
+### 15.1 Auth / API
+
+```
+ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_WORKSPACE_ID,
+ANTHROPIC_CUSTOM_HEADERS, ANTHROPIC_BETAS,
+ANTHROPIC_BASE_URL,    // override endpoint
+API_TIMEOUT_MS = 600000 (10 min),
+API_FORCE_IDLE_TIMEOUT  // 0|1
+```
+
+### 15.2 Cloud providers
+
+```
+# AWS
+ANTHROPIC_AWS_API_KEY, ANTHROPIC_AWS_BASE_URL, ANTHROPIC_AWS_WORKSPACE_ID,
+ANTHROPIC_BEDROCK_BASE_URL, ANTHROPIC_BEDROCK_MANTLE_BASE_URL,
+ANTHROPIC_BEDROCK_SERVICE_TIER ∈ {default, flex, priority},
+AWS_BEARER_TOKEN_BEDROCK, ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION,
+CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_ANTHROPIC_AWS
+
+# GCP / Vertex
+ANTHROPIC_VERTEX_BASE_URL, ANTHROPIC_VERTEX_PROJECT_ID,
+CLAUDE_CODE_USE_VERTEX
+
+# Azure / Foundry
+ANTHROPIC_FOUNDRY_API_KEY, ANTHROPIC_FOUNDRY_BASE_URL, ANTHROPIC_FOUNDRY_RESOURCE,
+CLAUDE_CODE_USE_FOUNDRY
+```
+
+### 15.3 Model selection / display
+
+```
+ANTHROPIC_MODEL,                              # primary
+ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL,
+ANTHROPIC_DEFAULT_{...}_MODEL_{NAME,DESCRIPTION,SUPPORTED_CAPABILITIES},
+ANTHROPIC_CUSTOM_MODEL_OPTION,
+ANTHROPIC_CUSTOM_MODEL_OPTION_{NAME,DESCRIPTION,SUPPORTED_CAPABILITIES},
+ANTHROPIC_SMALL_FAST_MODEL                    # DEPRECATED
+```
+
+### 15.4 Thinking / effort
+
+```
+MAX_THINKING_TOKENS,
+CLAUDE_CODE_DISABLE_THINKING,           # 0|1
+CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING,  # 0|1 (Opus 4.6/Sonnet 4.6)
+CLAUDE_CODE_EFFORT_LEVEL ∈ {low,medium,high,xhigh,max,auto},
+CLAUDE_CODE_ALWAYS_ENABLE_EFFORT        # 0|1
+```
+
+### 15.5 Tool & bash
+
+```
+BASH_DEFAULT_TIMEOUT_MS = 120000 (2 min),
+BASH_MAX_TIMEOUT_MS     = 600000 (10 min),
+BASH_MAX_OUTPUT_LENGTH,
+CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR,  # 0|1
+ENABLE_TOOL_SEARCH,                         # true|false (off for custom base URLs)
+CLAUDE_CODE_DISABLE_ATTACHMENTS             # 0|1
+```
+
+### 15.6 TLS & security
+
+```
+CLAUDE_CODE_CERT_STORE = "bundled,system",
+CLAUDE_CODE_CLIENT_CERT, CLAUDE_CODE_CLIENT_KEY, CLAUDE_CODE_CLIENT_KEY_PASSPHRASE
+```
+
+### 15.7 Feature toggles
+
+```
+CLAUDE_CODE_DISABLE_{AUTO_MEMORY,CLAUDE_MDS,FILE_CHECKPOINTING,GIT_INSTRUCTIONS,
+                     FAST_MODE,WORKFLOWS,BUNDLED_SKILLS,ADVISOR_TOOL,
+                     1M_CONTEXT,AGENT_VIEW,BACKGROUND_TASKS,CRON,
+                     POLICY_SKILLS,OFFICIAL_MARKETPLACE_AUTOINSTALL,
+                     NONESSENTIAL_TRAFFIC,EXPERIMENTAL_BETAS,
+                     LEGACY_MODEL_REMAP,NONSTREAMING_FALLBACK,
+                     TERMINAL_TITLE,ALTERNATE_SCREEN,MOUSE,VIRTUAL_SCROLL},
+CLAUDE_CODE_ENABLE_{GATEWAY_MODEL_DISCOVERY,AUTO_MODE,FINE_GRAINED_TOOL_STREAMING,
+                    AWAY_SUMMARY,BACKGROUND_PLUGIN_REFRESH},
+CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT,
+CLAUDE_CODE_NO_FLICKER,
+CLAUDE_CODE_ACCESSIBILITY,
+CLAUDE_CODE_ATTRIBUTION_HEADER,
+CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD,
+CLAUDE_AUTO_BACKGROUND_TASKS,
+CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS,
+CLAUDE_AGENT_SDK_MCP_NO_PREFIX
+```
+
+### 15.8 Context / compaction
+
+```
+CLAUDE_CODE_AUTO_COMPACT_WINDOW   # tokens
+CLAUDE_AUTOCOMPACT_PCT_OVERRIDE   # 1–100
+```
+
+### 15.9 Debug / log
+
+```
+CLAUDE_CODE_DEBUG_LOGS_DIR = ~/.claude/debug/<session-id>.txt,
+CLAUDE_CODE_DEBUG_LOG_LEVEL ∈ {verbose,debug,info,warn,error} = "debug",
+DEBUG = 0|1                       # matches --debug
+```
+
+### 15.10 Telemetry / surveys
+
+```
+DISABLE_TELEMETRY, DISABLE_AUTOUPDATER, DISABLE_FEEDBACK_COMMAND,
+DISABLE_ERROR_REPORTING, DO_NOT_TRACK,
+CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY,
+CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL
+```
+
+### 15.11 Subprocess detection
+
+```
+CLAUDECODE = 0|1                       # set by Claude Code in subprocesses
+CLAUDE_CODE_CHILD_SESSION = 0|1        # v2.1.172+; tool subprocesses
+CLAUDE_CODE_FORCE_SESSION_PERSISTENCE  # override nested-session exclusion
+CCR_FORCE_BUNDLE                       # 0|1, force bundle local repo
+CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS = 600000
+CLAUDE_CODE_API_KEY_HELPER_TTL_MS
+```
+
+### 15.12 Network
+
+```
+HTTP_PROXY, HTTPS_PROXY, NO_PROXY
+```
+
+### 15.13 Background sync flags
+
+```
+CLAUDE_CODE_SYNC_PLUGIN_INSTALL   # emits system/plugin_install events
+```
+
+### 15.14 Operating mode flags
+
+```
+CLAUDE_CODE_SIMPLE = 1  # set by --bare
+CLAUDE_CODE_SAFE_MODE   # --safe-mode
+CLAUDE_CODE_HIDE_CWD    # privacy
+CLAUDE_CODE_FORK_SUBAGENT
+CLAUDE_CODE_FORCE_SYNC_OUTPUT
+CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE
+CLAUDE_CODE_PLUGIN_PREFER_HTTPS
+CLAUDE_CODE_OPUS_4_6_FAST_MODE_OVERRIDE
+CLAUDE_CODE_STOP_HOOK_BLOCK_CAP
+CLAUDE_CODE_USE_POWERSHELL_TOOL
+CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY
+CLAUDE_CODE_SKIP_PROMPT_HISTORY
+CLAUDE_CONFIG_DIR  # override ~/.claude as session store base
+CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX
+```
+
+### 15.15 Precedence
+
+Env > settings file. CLI flags > env (for `--model`, `--debug`, etc). In-session commands win over both for most features. Exception: `CLAUDE_CODE_EFFORT_LEVEL` overrides `/effort`.
+
+---
+
+## 16. Files saved to disk for future rounds
+
+These doc fetches exceeded inline output and are saved verbatim under
+`~/.claude/projects/.../tool-results/` from the current session — to be
+folded into §17 (skills), §18 (sub-agents), §19 (agent-view), §20 (mcp):
+
+- `toolu_012r2SXNK3CkwxX6trDWAbyh.txt` — `skills.md` (53.2 KB)
+- `toolu_01WfRfn1fo7AWLbgnfX2weeG.txt` — `sub-agents.md` (66.8 KB)
+- `toolu_015PixAvAopKdWqNPugaczEJ.txt` — `agent-view.md` (55.4 KB)
+- `toolu_013Ga3ECTRqco1ULQ6xpqZ4H.txt` — `mcp.md` (49.7 KB)
+
+Next research turn folds these in. The structural decisions (universality via SDK `supportedX()` methods) are already locked in §10 and §12, so the catalog is usable as-is for opencode-side mapping work.
+
+---
+
+## 17. Status / next
+
+**Claude Code surface — sufficient coverage for mapping work to begin.** Remaining Claude Code docs (skills/sub-agents/agent-view/mcp full bodies + headless edge cases) refine but don't change the architectural conclusion in §10.
+
+**Next deliverable:** `docs/research/opencode-surface.md` — same depth, derived from sst/opencode source (18 server route groups in `packages/server/src/groups`, SDK v2 types in `packages/sdk/js/src/v2/gen`, TUI sync/data context).
+
+Then `docs/research/mapping.md` — the per-route, per-event 1:1 correspondence.
